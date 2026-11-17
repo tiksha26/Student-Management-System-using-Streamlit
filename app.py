@@ -1,116 +1,105 @@
 
 import streamlit as st
+import sqlite3
 import pandas as pd
 
-st.set_page_config(page_title="Student Management System", page_icon="🎓")
+# Connect to database (creates student.db automatically)
+conn = sqlite3.connect("student.db", check_same_thread=False)
+cursor = conn.cursor()
 
-st.title("🎓 Student Record Management System")
-st.write("Manage student records using CRUD operations.")
+# Create table
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS students (
+    roll INTEGER PRIMARY KEY,
+    name TEXT,
+    age INTEGER,
+    course TEXT,
+    marks REAL
+)
+""")
+conn.commit()
 
-# Initialize student data
-if "students" not in st.session_state:
-    st.session_state.students = pd.DataFrame(
-        columns=["Roll No", "Name", "Age", "Course", "Marks"]
-    )
+st.title("Student Record Management System")
 
-# Menu
 menu = st.sidebar.selectbox(
-    "Select Operation",
+    "Choose Operation",
     ["Add Student", "View Students", "Update Student", "Delete Student"]
 )
 
 # CREATE
 if menu == "Add Student":
-    st.subheader("Add New Student")
+    st.subheader("Add Student")
 
-    with st.form("add_form"):
-        roll = st.number_input("Roll Number", min_value=1, step=1)
-        name = st.text_input("Student Name")
-        age = st.number_input("Age", min_value=1, max_value=100)
-        course = st.text_input("Course")
-        marks = st.number_input("Marks", min_value=0, max_value=100)
+    roll = st.number_input("Roll Number", min_value=1, step=1)
+    name = st.text_input("Name")
+    age = st.number_input("Age", min_value=1, step=1)
+    course = st.text_input("Course")
+    marks = st.number_input("Marks", min_value=0.0, max_value=100.0)
 
-        submit = st.form_submit_button("Add Student")
-
-        if submit:
-            if name.strip() == "" or course.strip() == "":
-                st.error("Please enter all details.")
-            elif roll in st.session_state.students["Roll No"].values:
-                st.error("Roll Number already exists!")
-            else:
-                new_student = pd.DataFrame([{
-                    "Roll No": roll,
-                    "Name": name,
-                    "Age": age,
-                    "Course": course,
-                    "Marks": marks
-                }])
-
-                st.session_state.students = pd.concat(
-                    [st.session_state.students, new_student],
-                    ignore_index=True
-                )
-
-                st.success("Student added successfully!")
+    if st.button("Add"):
+        try:
+            cursor.execute(
+                "INSERT INTO students VALUES (?, ?, ?, ?, ?)",
+                (roll, name, age, course, marks)
+            )
+            conn.commit()
+            st.success("Student Added Successfully!")
+        except sqlite3.IntegrityError:
+            st.error("Roll Number already exists!")
 
 # READ
 elif menu == "View Students":
-    st.subheader("All Student Records")
+    st.subheader("Student Records")
 
-    if not st.session_state.students.empty:
-        st.dataframe(st.session_state.students, use_container_width=True)
-    else:
-        st.info("No student records available.")
+    df = pd.read_sql_query("SELECT * FROM students", conn)
+    st.dataframe(df, use_container_width=True)
 
 # UPDATE
 elif menu == "Update Student":
-    st.subheader("Update Student Details")
+    st.subheader("Update Student")
 
-    df = st.session_state.students
+    cursor.execute("SELECT roll FROM students")
+    rolls = [row[0] for row in cursor.fetchall()]
 
-    if not df.empty:
-        roll = st.selectbox("Select Roll Number", df["Roll No"].tolist())
+    if rolls:
+        roll = st.selectbox("Select Roll Number", rolls)
 
-        student = df[df["Roll No"] == roll].iloc[0]
+        cursor.execute("SELECT * FROM students WHERE roll=?", (roll,))
+        student = cursor.fetchone()
 
-        with st.form("update_form"):
-            name = st.text_input("Name", value=student["Name"])
-            age = st.number_input("Age", min_value=1, max_value=100,
-                                  value=int(student["Age"]))
-            course = st.text_input("Course", value=student["Course"])
-            marks = st.number_input("Marks", min_value=0, max_value=100,
-                                    value=int(student["Marks"]))
+        name = st.text_input("Name", student[1])
+        age = st.number_input("Age", min_value=1, value=student[2])
+        course = st.text_input("Course", student[3])
+        marks = st.number_input("Marks", min_value=0.0, max_value=100.0,
+                                value=float(student[4]))
 
-            update = st.form_submit_button("Update Student")
+        if st.button("Update"):
+            cursor.execute("""
+                UPDATE students
+                SET name=?, age=?, course=?, marks=?
+                WHERE roll=?
+            """, (name, age, course, marks, roll))
 
-            if update:
-                idx = st.session_state.students[
-                    st.session_state.students["Roll No"] == roll
-                ].index[0]
-
-                st.session_state.students.loc[idx, ["Name", "Age", "Course", "Marks"]] = [
-                    name, age, course, marks
-                ]
-
-                st.success("Student record updated successfully!")
+            conn.commit()
+            st.success("Student Updated Successfully!")
     else:
-        st.info("No records available to update.")
+        st.info("No student records found.")
 
 # DELETE
 elif menu == "Delete Student":
-    st.subheader("Delete Student Record")
+    st.subheader("Delete Student")
 
-    df = st.session_state.students
+    cursor.execute("SELECT roll FROM students")
+    rolls = [row[0] for row in cursor.fetchall()]
 
-    if not df.empty:
-        roll = st.selectbox("Select Roll Number to Delete",
-                            df["Roll No"].tolist())
+    if rolls:
+        roll = st.selectbox("Select Roll Number", rolls)
 
-        if st.button("Delete Student"):
-            st.session_state.students = df[
-                df["Roll No"] != roll
-            ].reset_index(drop=True)
-
-            st.success("Student record deleted successfully!")
+        if st.button("Delete"):
+            cursor.execute("DELETE FROM students WHERE roll=?", (roll,))
+            conn.commit()
+            st.success("Student Deleted Successfully!")
     else:
-        st.info("No records available to delete.")
+        st.info("No student records found.")
+
+conn.close()
